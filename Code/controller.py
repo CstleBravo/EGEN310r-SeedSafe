@@ -55,21 +55,44 @@ class SeedSafeController:
 
     def manual_open(self):
         self._handle_event(Events.MANUAL_OPEN)
+        return self.status()
 
     def manual_close(self):
         self._handle_event(Events.MANUAL_CLOSE)
+        return self.status()
 
     def reset_fault(self):
         self._handle_event(Events.RESET_FAULT)
+        return self.status()
 
     def status(self):
+        readings = self.sensors.read_all()
+
         return {
             "state": self.state_machine.state,
             "last_close_reason": self.state_machine.last_close_reason,
+            "feeding_window_active": self.scheduler.feeding_window_is_active(),
+            "sensors": {
+                "force_value": readings.force_value,
+                "motion_detected": readings.motion_detected,
+                "moisture_value": readings.moisture_value,
+                "battery_voltage": readings.battery_voltage,
+            },
+            "settings": {
+                "feeding_start_hour": self.settings["feeding_start_hour"],
+                "feeding_end_hour": self.settings["feeding_end_hour"],
+                "cooldown_seconds": self.settings["cooldown_seconds"],
+                "force_threshold": self.settings["force_threshold"],
+                "moisture_threshold": self.settings["moisture_threshold"],
+                "low_battery_voltage": self.settings["low_battery_voltage"],
+            },
             "recent_events": self.logger.recent(),
         }
 
     def _handle_event(self, event):
+        if event in (Events.OPEN_CONFIRMED, Events.CLOSE_CONFIRMED):
+            self._stop_motor_if_supported()
+
         result = self.state_machine.handle(event)
         if result["old_state"] != result["new_state"] or result["action"] != Actions.NONE:
             self.logger.record(self.clock, event, result["new_state"])
@@ -93,3 +116,8 @@ class SeedSafeController:
         elapsed = self.clock.seconds() - self.movement_started_at
         if elapsed >= self.settings["motor_timeout_seconds"]:
             self._handle_event(Events.MOTOR_TIMEOUT)
+
+    def _stop_motor_if_supported(self):
+        stop = getattr(self.motor, "stop", None)
+        if stop is not None:
+            stop()

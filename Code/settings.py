@@ -6,11 +6,17 @@ DEFAULT_SETTINGS = {
     "force_threshold": 500,
     "moisture_threshold": 600,
     "low_battery_voltage": 3.4,
+    "battery_adc_reference_voltage": 3.3,
+    "battery_voltage_divider_ratio": 2.0,
     "loop_delay_seconds": 1,
+    "web_server_enabled": False,
+    "web_server_host": "0.0.0.0",
+    "web_server_port": 80,
 }
 
 
 PIN_MAP = {
+    # These are placeholder GPIOs. Update them to match the final wiring.
     "motor_open": 14,
     "motor_close": 15,
     "force_sensor_adc": 26,
