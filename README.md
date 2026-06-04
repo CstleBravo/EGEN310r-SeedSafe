@@ -39,17 +39,19 @@ Then update the placeholder GPIO values in `Code/settings.py`.
 
 The current Pico hardware layer assumes:
 
-- force sensor on an ADC pin,
-- moisture sensor on an ADC pin,
-- battery monitor on an ADC pin through a voltage divider,
-- motion sensor on a digital input pin,
-- open/closed limit switches on digital input pins,
-- a simple two-pin motor driver with one open command pin and one close command
-  pin.
+- 28BYJ-48 stepper motor through its driver board,
+- MPU6050 accelerometer over I2C for contact/impact detection,
+- DHT11 temperature/humidity sensor,
+- PIR motion sensor on a digital input pin,
+- raindrop module with analog output, digital output, or both,
+- optional battery monitor on an ADC pin through a voltage divider.
 
-The motor class is intentionally a placeholder. If the final corkscrew uses a
-servo, stepper motor, or H-bridge with PWM speed control, only the motor class
-should need major changes.
+The stepper class uses a common 28BYJ-48 half-step sequence. The exact number
+of steps to fully open or close the corkscrew will need to be calibrated once
+the mechanism is assembled.
+
+The MPU6050 is currently used as a rough contact/impact sensor. It does not
+identify a bear; it detects strong motion/contact with the feeder body.
 
 ## Local Web Dashboard
 

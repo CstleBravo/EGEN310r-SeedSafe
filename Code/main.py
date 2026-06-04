@@ -4,8 +4,7 @@ from hardware import (
     Clock,
     FakeMotor,
     FakePositionSensor,
-    PicoDigitalMotor,
-    PicoLimitSwitchPositionSensor,
+    PicoStepper28BYJ48,
     StatusLight,
 )
 from scheduler import ScheduleManager
@@ -23,11 +22,16 @@ def build_controller(use_real_hardware=USE_REAL_PICO_HARDWARE):
 
     if use_real_hardware:
         sensors = PicoSensors(settings, PIN_MAP)
-        motor = PicoDigitalMotor(PIN_MAP["motor_open"], PIN_MAP["motor_close"])
-        position_sensor = PicoLimitSwitchPositionSensor(
-            PIN_MAP["open_limit"],
-            PIN_MAP["closed_limit"],
+        motor = PicoStepper28BYJ48(
+            [
+                PIN_MAP["stepper_in1"],
+                PIN_MAP["stepper_in2"],
+                PIN_MAP["stepper_in3"],
+                PIN_MAP["stepper_in4"],
+            ],
+            settings,
         )
+        position_sensor = FakePositionSensor(motor)
         status_light = StatusLight(PIN_MAP["status_led"])
     else:
         sensors = FakeSensors(settings)
