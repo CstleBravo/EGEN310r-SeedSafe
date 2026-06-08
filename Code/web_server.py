@@ -43,9 +43,20 @@ class LocalWebServer:
             return
 
         try:
-            request = client.recv(1024)
+            self._configure_client_socket(client)
+            try:
+                request = client.recv(1024)
+            except OSError as exc:
+                print("Web receive error:", exc)
+                return
             method, path = self._request_line_from_request(request)
-            status_code, content_type, body = self._handle_request(method, path)
+            try:
+                status_code, content_type, body = self._handle_request(method, path)
+            except Exception as exc:
+                print("Web request error:", exc)
+                status_code = 500
+                content_type = "text/plain"
+                body = "Internal server error"
             self._send_response(client, status_code, content_type, body)
         finally:
             client.close()
@@ -99,6 +110,7 @@ class LocalWebServer:
             200: "OK",
             303: "See Other",
             404: "Not Found",
+            500: "Internal Server Error",
         }.get(status_code, "OK")
 
         headers = [
@@ -112,6 +124,12 @@ class LocalWebServer:
 
         response = "\r\n".join(headers) + "\r\n\r\n" + body
         client.send(response.encode())
+
+    def _configure_client_socket(self, client):
+        try:
+            client.settimeout(1)
+        except AttributeError:
+            pass
 
     def _dashboard_html(self):
         status = self.controller.status()
@@ -128,31 +146,50 @@ class LocalWebServer:
         return """<!doctype html>
 <html>
 <head>
-    <title>Seed Safe</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 2rem; }}
-        .card {{ border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }}
-        a.button {{ display: inline-block; padding: 0.75rem 1rem; margin: 0.25rem; background: #224; color: white; text-decoration: none; border-radius: 6px; }}
-    </style>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{{
+    background:#0f172a;
+    color:white;
+    font-family:Arial;
+    padding:20px;
+}}
+.card{{
+    background:#1e293b;
+    border-radius:12px;
+    padding:15px;
+    margin-bottom:15px;
+}}
+.button{{
+    background:#14b8a6;
+    color:white;
+    padding:12px 18px;
+    text-decoration:none;
+    border-radius:8px;
+    margin-right:10px;
+}}
+.button-danger{{
+    background:#ef4444;
+}}
+</style>
 </head>
 <body>
-    <h1>Seed Safe</h1>
-    <div class="card">
-        <h2>Status</h2>
-        <p><strong>State:</strong> {state}</p>
-        <p><strong>Last close reason:</strong> {last_close_reason}</p>
-    </div>
-    <div class="card">
-        <h2>Manual Controls</h2>
-        <a class="button" href="/open">Open</a>
-        <a class="button" href="/close">Close</a>
-        <a class="button" href="/reset">Reset Fault</a>
-    </div>
-    <div class="card">
-        <h2>Recent Events</h2>
-        <ul>{event_items}</ul>
-    </div>
+<h1>Seed Safe</h1>
+<div class="card">
+<h2>Status</h2>
+<p>State: {state}</p>
+<p>Last Close Reason: {last_close_reason}</p>
+</div>
+<div class="card">
+<h2>Manual Controls</h2>
+<a class="button" href="/open">Open Feeder</a>
+<a class="button button-danger" href="/close">Close Feeder</a>
+<a class="button" href="/reset">Reset Fault</a>
+</div>
+<div class="card">
+<h2>Recent Events</h2>
+<ul>{event_items}</ul>
+</div>
 </body>
 </html>""".format(
             state=status["state"],

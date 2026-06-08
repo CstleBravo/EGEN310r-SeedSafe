@@ -61,6 +61,13 @@ def main():
     controller.boot()
 
     if settings["web_server_enabled"]:
+        from secrets import WIFI_SSID, WIFI_PASSWORD
+        from wifi import connect_to_wifi
+
+        ip = connect_to_wifi(WIFI_SSID, WIFI_PASSWORD)
+        print("Dashboard at:")
+        print("http://{}:{}".format(ip, settings["web_server_port"]))
+
         web_server = LocalWebServer(
             controller,
             settings["web_server_host"],

@@ -13,7 +13,7 @@ DEFAULT_SETTINGS = {
     "stepper_steps_per_close": 2048,
     "stepper_step_delay_ms": 2,
     "loop_delay_seconds": 1,
-    "web_server_enabled": False,
+    "web_server_enabled": True,
     "web_server_host": "0.0.0.0",
     "web_server_port": 80,
 }
