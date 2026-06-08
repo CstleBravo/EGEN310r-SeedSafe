@@ -1,2 +1,3 @@
 Code/secrets.py
 __pycache__/
+*.log

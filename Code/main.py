@@ -10,6 +10,7 @@ from hardware import (
 from scheduler import ScheduleManager
 from sensor import FakeSensors, PicoSensors
 from settings import PIN_MAP, load_settings
+from command_server import PicoCommandServer
 from web_server import LocalWebServer
 
 
@@ -58,16 +59,18 @@ def build_controller(use_real_hardware=USE_REAL_PICO_HARDWARE):
 def main():
     controller, clock, settings = build_controller()
     web_server = None
+    command_server = None
     controller.boot()
 
-    if settings["web_server_enabled"]:
+    if settings["web_server_enabled"] or settings["command_server_enabled"]:
         from secrets import WIFI_SSID, WIFI_PASSWORD
         from wifi import connect_to_wifi
 
         ip = connect_to_wifi(WIFI_SSID, WIFI_PASSWORD)
-        print("Dashboard at:")
-        print("http://{}:{}".format(ip, settings["web_server_port"]))
 
+    if settings["web_server_enabled"]:
+        print("Pico-hosted dashboard at:")
+        print("http://{}:{}".format(ip, settings["web_server_port"]))
         web_server = LocalWebServer(
             controller,
             settings["web_server_host"],
@@ -75,10 +78,22 @@ def main():
         )
         web_server.start()
 
+    if settings["command_server_enabled"]:
+        print("Pico command server at:")
+        print("{}:{}".format(ip, settings["command_server_port"]))
+        command_server = PicoCommandServer(
+            controller,
+            settings["command_server_host"],
+            settings["command_server_port"],
+        )
+        command_server.start()
+
     while True:
         controller.tick()
         if web_server is not None:
             web_server.poll()
+        if command_server is not None:
+            command_server.poll()
         print(controller.status())
         clock.sleep(settings["loop_delay_seconds"])
 
