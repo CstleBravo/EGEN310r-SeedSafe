@@ -24,7 +24,10 @@ class SeedSafeController:
             self._handle_event(Events.BATTERY_LOW)
 
         if self.state_machine.state == States.CLOSED_IDLE:
-            if self.scheduler.feeding_window_is_active():
+            if (
+                self.scheduler.feeding_window_is_active()
+                and not self.scheduler.manual_hold_is_active()
+            ):
                 self._handle_event(Events.FEEDING_WINDOW_STARTED)
 
         elif self.state_machine.state == States.OPENING:
@@ -54,6 +57,7 @@ class SeedSafeController:
                 self._handle_event(Events.COOLDOWN_EXPIRED)
 
     def manual_open(self):
+        self.scheduler.clear_manual_hold()
         self._handle_event(Events.MANUAL_OPEN)
         return self.status()
 
@@ -72,6 +76,8 @@ class SeedSafeController:
             "state": self.state_machine.state,
             "last_close_reason": self.state_machine.last_close_reason,
             "feeding_window_active": self.scheduler.feeding_window_is_active(),
+            "manual_hold_active": self.scheduler.manual_hold_is_active(),
+            "manual_hold_remaining_seconds": self.scheduler.manual_hold_remaining_seconds(),
             "sensors": {
                 "force_value": readings.force_value,
                 "impact_value": readings.impact_value,
@@ -88,6 +94,7 @@ class SeedSafeController:
                 "feeding_start_hour": self.settings["feeding_start_hour"],
                 "feeding_end_hour": self.settings["feeding_end_hour"],
                 "cooldown_seconds": self.settings["cooldown_seconds"],
+                "manual_close_cooldown_seconds": self.settings["manual_close_cooldown_seconds"],
                 "impact_threshold": self.settings["impact_threshold"],
                 "moisture_threshold": self.settings["moisture_threshold"],
                 "low_battery_voltage": self.settings["low_battery_voltage"],
@@ -115,6 +122,8 @@ class SeedSafeController:
                 self._handle_event(Events.CLOSE_CONFIRMED)
                 if self.state_machine.state == States.CLOSED_COOLDOWN:
                     self.scheduler.start_cooldown()
+                elif self.state_machine.last_close_reason == Events.MANUAL_CLOSE:
+                    self.scheduler.start_manual_hold()
 
     def _check_motor_timeout(self):
         if self.movement_started_at is None:

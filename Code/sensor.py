@@ -89,18 +89,26 @@ class PicoSensors:
         self.raindrop_adc = self._optional_adc(pin_map.get("raindrop_adc"))
         self.raindrop_digital = self._optional_input_pin(pin_map.get("raindrop_digital"))
         self.battery_adc = self._optional_adc(pin_map.get("battery_adc"))
-        self.motion_pin = Pin(pin_map["pir_sensor"], Pin.IN)
-        self.i2c = I2C(
-            pin_map["mpu6050_i2c_id"],
-            sda=Pin(pin_map["mpu6050_sda"]),
-            scl=Pin(pin_map["mpu6050_scl"]),
-        )
-        self.mpu_address = pin_map["mpu6050_address"]
-        self._wake_mpu6050()
+        self.motion_pin = self._optional_input_pin(pin_map.get("pir_sensor"))
+        self.i2c = None
+        self.mpu_address = pin_map.get("mpu6050_address")
+        if self._mpu6050_is_configured(pin_map):
+            self.i2c = I2C(
+                pin_map["mpu6050_i2c_id"],
+                sda=Pin(pin_map["mpu6050_sda"]),
+                scl=Pin(pin_map["mpu6050_scl"]),
+            )
+            try:
+                self._wake_mpu6050()
+            except OSError:
+                print("MPU6050 not detected; continuing without accelerometer")
+                self.i2c = None
+                self.mpu_address = None
         self.dht_sensor = None
 
-        if dht is not None:
-            self.dht_sensor = dht.DHT11(Pin(pin_map["dht11"]))
+        dht_pin = pin_map.get("dht11")
+        if dht is not None and dht_pin is not None:
+            self.dht_sensor = dht.DHT11(Pin(dht_pin))
 
     def read_all(self):
         acceleration_x, acceleration_y, acceleration_z = self._read_acceleration()
@@ -108,10 +116,13 @@ class PicoSensors:
         moisture_value = self._read_moisture()
         battery_voltage = self._read_battery_voltage()
         temperature_c, humidity_percent = self._read_dht11()
+        motion_detected = False
+        if self.motion_pin is not None:
+            motion_detected = self.motion_pin.value() == 1
 
         return SensorReadings(
             impact_value,
-            self.motion_pin.value() == 1,
+            motion_detected,
             moisture_value,
             battery_voltage,
             temperature_c,
@@ -146,6 +157,14 @@ class PicoSensors:
             return None
         return Pin(pin_id, Pin.IN)
 
+    def _mpu6050_is_configured(self, pin_map):
+        return (
+            pin_map.get("mpu6050_i2c_id") is not None
+            and pin_map.get("mpu6050_sda") is not None
+            and pin_map.get("mpu6050_scl") is not None
+            and pin_map.get("mpu6050_address") is not None
+        )
+
     def _read_moisture(self):
         if self.raindrop_adc is not None:
             return self.raindrop_adc.read_u16()
@@ -173,10 +192,14 @@ class PicoSensors:
             return None, None
 
     def _wake_mpu6050(self):
+        if self.i2c is None or self.mpu_address is None:
+            return
         # PWR_MGMT_1 register. Writing 0 wakes the sensor from sleep.
         self.i2c.writeto_mem(self.mpu_address, 0x6B, b"\x00")
 
     def _read_acceleration(self):
+        if self.i2c is None or self.mpu_address is None:
+            return 0, 0, 0
         data = self.i2c.readfrom_mem(self.mpu_address, 0x3B, 6)
         x = self._signed_16(data[0], data[1])
         y = self._signed_16(data[2], data[3])
