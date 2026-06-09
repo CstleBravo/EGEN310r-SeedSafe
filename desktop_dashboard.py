@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -7,6 +8,8 @@ from urllib.parse import parse_qs, urlparse
 
 DEFAULT_PICO_HOST = "192.168.1.100"
 DEFAULT_PICO_PORT = 5050
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSET_DIR = os.path.join(BASE_DIR, "assets")
 
 
 class PicoClient:
@@ -41,6 +44,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/":
             self._send_html(DASHBOARD_HTML)
+            return
+
+        if parsed.path == "/assets/seed_safe_logo.png":
+            self._send_file(
+                os.path.join(ASSET_DIR, "seed_safe_logo.png"),
+                "image/png",
+            )
             return
 
         if parsed.path == "/api/status":
@@ -102,6 +112,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
         self.wfile.write(encoded)
+
+    def _send_file(self, path, content_type):
+        if not os.path.isfile(path):
+            self._send_json({"ok": False, "error": "Asset not found"}, status=404)
+            return
+
+        with open(path, "rb") as file:
+            data = file.read()
+
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
 
     def _send_json(self, payload, status=200):
         encoded = json.dumps(payload).encode("utf-8")
@@ -167,32 +192,19 @@ button{cursor:pointer}
 .brand{
   display:flex;
   align-items:center;
-  gap:12px;
   margin-bottom:44px;
-  color:#b8ffc8;
-  font-size:23px;
-  font-weight:800;
 }
 .logo{
-  width:40px;
-  height:40px;
-  position:relative;
-  border-radius:50%;
-  background:linear-gradient(145deg,#d7ffe0,#4bd875);
-  box-shadow:0 0 24px rgba(98,233,133,.35);
+  width:190px;
+  height:68px;
+  display:block;
+  object-fit:cover;
+  object-position:center;
+  border-radius:10px;
+  mix-blend-mode:screen;
+  filter:contrast(1.18) saturate(1.18) brightness(1.28);
+  opacity:.94;
 }
-.logo:before,.logo:after{
-  content:"";
-  position:absolute;
-  width:12px;
-  height:18px;
-  top:12px;
-  border:2px solid #155f38;
-  border-top-left-radius:14px;
-  border-bottom-right-radius:14px;
-}
-.logo:before{left:9px;transform:rotate(-28deg)}
-.logo:after{right:9px;transform:rotate(28deg) scaleX(-1)}
 .nav{display:grid;gap:12px}
 .nav a{
   min-height:56px;
@@ -502,7 +514,7 @@ input:focus{
 <body>
 <div class="app">
   <aside class="sidebar">
-    <div class="brand"><span class="logo" aria-hidden="true"></span><span>Seed Safe</span></div>
+    <div class="brand"><img class="logo" src="/assets/seed_safe_logo.png" alt="Seed Safe"></div>
     <nav class="nav" aria-label="Main navigation">
       <a class="active" href="#"><b>H</b>Dashboard</a>
       <a href="#controls"><b>C</b>Controls</a>
