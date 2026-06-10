@@ -61,12 +61,17 @@ def main():
     web_server = None
     command_server = None
     controller.boot()
+    ip = None
 
     if settings["web_server_enabled"] or settings["command_server_enabled"]:
-        from secrets import WIFI_SSID, WIFI_PASSWORD
-        from wifi import connect_to_wifi
+        from wifi import connect_to_wifi, wifi_supported
 
-        ip = connect_to_wifi(WIFI_SSID, WIFI_PASSWORD)
+        if wifi_supported():
+            from secrets import WIFI_SSID, WIFI_PASSWORD
+
+            ip = connect_to_wifi(WIFI_SSID, WIFI_PASSWORD)
+        else:
+            ip = "127.0.0.1"
 
     if settings["web_server_enabled"]:
         print("Pico-hosted dashboard at:")

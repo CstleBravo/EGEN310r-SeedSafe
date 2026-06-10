@@ -5,6 +5,11 @@ except ImportError:
 
 import time
 
+
+def wifi_supported():
+    return network is not None
+
+
 def connect_to_wifi(ssid, password, timeout_seconds=15):
     if network is None:
         raise RuntimeError("WiFi connection requires the MicroPython network module")
