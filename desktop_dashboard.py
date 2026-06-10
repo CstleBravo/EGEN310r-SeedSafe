@@ -3,12 +3,14 @@ import html
 import json
 import os
 import socket
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 
 DEFAULT_PICO_HOST = "192.168.1.100"
 DEFAULT_PICO_PORT = 5050
+DEMO_MODE = False
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSET_DIR = os.path.join(BASE_DIR, "assets")
 HTMX_CDN = (
@@ -40,6 +42,113 @@ class PicoClient:
 
         raw_response = b"".join(chunks).decode("utf-8").strip()
         return json.loads(raw_response)
+
+
+class DemoPicoClient:
+    state = "CLOSED_IDLE"
+    last_close_reason = None
+    manual_hold_until = 0
+    started_at = time.time()
+    events = []
+
+    def __init__(self, host=None, port=None, timeout=3):
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        if not self.events:
+            self._record("BOOT_COMPLETE", "CLOSED_IDLE")
+
+    def send_command(self, command):
+        command = command.strip().upper()
+
+        if command == "PING":
+            return {"ok": True, "message": "pong"}
+
+        if command == "OPEN":
+            self.state = "OPEN_MONITORING"
+            self.last_close_reason = None
+            self.manual_hold_until = 0
+            self._record("MANUAL_OPEN", "OPEN_MONITORING")
+            self._record("OPEN_CONFIRMED", "OPEN_MONITORING")
+            return {"ok": True, "command": command, "status": self._status()}
+
+        if command == "CLOSE":
+            self.state = "CLOSED_IDLE"
+            self.last_close_reason = "MANUAL_CLOSE"
+            self.manual_hold_until = time.time() + 300
+            self._record("MANUAL_CLOSE", "CLOSED_IDLE")
+            self._record("CLOSE_CONFIRMED", "CLOSED_IDLE")
+            return {"ok": True, "command": command, "status": self._status()}
+
+        if command == "RESET":
+            self.state = "CLOSED_IDLE"
+            self.last_close_reason = None
+            self.manual_hold_until = 0
+            self._record("RESET_FAULT", "CLOSED_IDLE")
+            return {"ok": True, "command": command, "status": self._status()}
+
+        if command == "STATUS":
+            return {"ok": True, "status": self._status()}
+
+        return {"ok": False, "error": "Unknown command"}
+
+    def _status(self):
+        now = time.time()
+        elapsed = int(now - self.started_at)
+        local_time = time.localtime(now)
+        feeding_window_active = 7 <= local_time.tm_hour < 19
+        manual_hold_remaining = max(0, int(self.manual_hold_until - now))
+        if manual_hold_remaining == 0 and self.last_close_reason == "MANUAL_CLOSE":
+            self.last_close_reason = None
+
+        return {
+            "state": self.state,
+            "last_close_reason": self.last_close_reason,
+            "feeding_window_active": feeding_window_active,
+            "manual_hold_active": manual_hold_remaining > 0,
+            "manual_hold_remaining_seconds": manual_hold_remaining,
+            "sensors": {
+                "force_value": 40 + (elapsed % 20),
+                "impact_value": 120 + ((elapsed * 37) % 240),
+                "motion_detected": elapsed % 9 in (0, 1),
+                "moisture_value": 80 + ((elapsed * 11) % 35),
+                "battery_voltage": 4.86,
+                "temperature_c": 22 + (elapsed % 4),
+                "humidity_percent": 39 + (elapsed % 7),
+                "acceleration_x": 80 + (elapsed % 20),
+                "acceleration_y": -40 + (elapsed % 16),
+                "acceleration_z": 16384,
+            },
+            "settings": {
+                "feeding_start_hour": 7,
+                "feeding_end_hour": 19,
+                "cooldown_seconds": 1800,
+                "manual_close_cooldown_seconds": 300,
+                "impact_threshold": 9000,
+                "moisture_threshold": 600,
+                "low_battery_voltage": 3.4,
+            },
+            "recent_events": list(self.events),
+        }
+
+    def _record(self, event_type, details):
+        now = time.localtime()
+        self.events.append(
+            {
+                "time": [
+                    now.tm_year,
+                    now.tm_mon,
+                    now.tm_mday,
+                    now.tm_hour,
+                    now.tm_min,
+                    now.tm_sec,
+                ],
+                "type": event_type,
+                "details": details,
+            }
+        )
+        if len(self.events) > 50:
+            self.events.pop(0)
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -123,7 +232,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         pico_port = int(self._first(params, "pico_port", self.default_pico_port))
 
         try:
-            response = PicoClient(pico_host, pico_port).send_command(command)
+            client_type = DemoPicoClient if DEMO_MODE else PicoClient
+            response = client_type(pico_host, pico_port).send_command(command)
             if not response.get("ok"):
                 raise RuntimeError(response.get("error", "Unknown Pico error"))
 
@@ -628,11 +738,52 @@ portInput.value = localStorage.getItem('picoPort') || '{default_port}';
 function persistConnectionSettings(){{
   localStorage.setItem('picoHost', hostInput.value);
   localStorage.setItem('picoPort', portInput.value);
-  htmx.trigger('#dashboardSync', 'refresh');
+  refreshDashboard();
 }}
 
 hostInput.addEventListener('change', persistConnectionSettings);
 portInput.addEventListener('change', persistConnectionSettings);
+
+function connectionParams(){{
+  return new URLSearchParams(new FormData(document.querySelector('#connectionForm')));
+}}
+
+function applyDashboardFragments(markup){{
+  const doc = new DOMParser().parseFromString(markup, 'text/html');
+  ['onlinePill', 'statusPanel', 'overviewPanel', 'controlsPanel', 'eventsPanel', 'connectionState'].forEach((id) => {{
+    const next = doc.querySelector('#' + id);
+    const current = document.querySelector('#' + id);
+    if (next && current) current.replaceWith(next);
+  }});
+}}
+
+async function refreshDashboard(){{
+  if (window.htmx) {{
+    htmx.trigger('#dashboardSync', 'refresh');
+    return;
+  }}
+  const response = await fetch('/partials/dashboard?' + connectionParams().toString(), {{cache: 'no-store'}});
+  applyDashboardFragments(await response.text());
+}}
+
+document.body.addEventListener('click', async (event) => {{
+  const button = event.target.closest('button.command');
+  if (!button || window.htmx) return;
+  const match = button.getAttribute('hx-post').match(/command=([A-Z]+)/);
+  if (!match) return;
+  const params = connectionParams();
+  params.set('command', match[1]);
+  const response = await fetch('/partials/command?' + params.toString(), {{
+    method: 'POST',
+    cache: 'no-store',
+  }});
+  applyDashboardFragments(await response.text());
+}});
+
+if (!window.htmx) {{
+  refreshDashboard();
+  setInterval(refreshDashboard, 2000);
+}}
 </script>
 </body>
 </html>""".format(
@@ -791,10 +942,13 @@ portInput.addEventListener('change', persistConnectionSettings);
     def _render_connection_state(self, context):
         classes = "connection ok" if context["ok"] else "connection bad"
         if context["ok"]:
-            message = "Connected to {}:{}".format(
-                context["pico_host"],
-                context["pico_port"],
-            )
+            if DEMO_MODE:
+                message = "Demo mode is running locally with simulated Pico data."
+            else:
+                message = "Connected to {}:{}".format(
+                    context["pico_host"],
+                    context["pico_port"],
+                )
         else:
             message = context["error"]
 
@@ -896,20 +1050,27 @@ portInput.addEventListener('change', persistConnectionSettings);
 
 
 def main():
+    global DEMO_MODE
+
     parser = argparse.ArgumentParser(description="Host the Seed Safe dashboard on this computer.")
     parser.add_argument("--host", default="127.0.0.1", help="Dashboard bind address")
     parser.add_argument("--port", type=int, default=8080, help="Dashboard HTTP port")
     parser.add_argument("--pico-host", default=DEFAULT_PICO_HOST, help="Default Pico IP address")
     parser.add_argument("--pico-port", type=int, default=DEFAULT_PICO_PORT, help="Default Pico command port")
+    parser.add_argument("--demo", action="store_true", help="Run with simulated Pico data and no hardware")
     args = parser.parse_args()
 
+    DEMO_MODE = args.demo
     DashboardHandler.default_pico_host = args.pico_host
     DashboardHandler.default_pico_port = args.pico_port
 
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
     url = "http://{}:{}".format(args.host, args.port)
     print("Seed Safe dashboard running at {}".format(url))
-    print("Default Pico target is {}:{}".format(args.pico_host, args.pico_port))
+    if DEMO_MODE:
+        print("Demo mode enabled: using simulated Pico data")
+    else:
+        print("Default Pico target is {}:{}".format(args.pico_host, args.pico_port))
     server.serve_forever()
 
 
